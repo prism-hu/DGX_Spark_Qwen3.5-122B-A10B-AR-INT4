@@ -45,5 +45,25 @@ COPY patches/03-int8-lm-head/patch_int8_lmhead.py /opt/patches/patch_int8_lmhead
 RUN python3 /opt/patches/patch_int8_lmhead.py \
  && grep -q DGX_SPARK_INT8_LMHEAD_V2 /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/logits_processor.py
 
+# Patch 3 (prism-hu fork): the base's torchaudio is ABI-built against torch 2.14
+# (the cu130 nightly index cross-pins torchvision/torchaudio to a newer torch),
+# so its libtorchaudio.abi3.so fails to load against our torch 2.13 base with
+# "undefined symbol: torch_exception_get_what_without_backtrace" — which crashes
+# vLLM at startup (transformers imports torchaudio). LLM serving does not need
+# torchaudio and transformers tolerates its absence, so remove it.
+RUN pip uninstall -y torchaudio || true \
+ && ! python3 -c 'import torchaudio' 2>/dev/null
+
+# Patch 4 (prism-hu fork): vLLM 0.19.0 requires `fastapi[standard] >= 0.115.0`
+# with NO upper bound, so the base pulls fastapi 0.137 — which adds `_IncludedRouter`
+# to app.routes. vLLM's prometheus_fastapi_instrumentator (8.0.0, latest) can't
+# iterate that and raises "'_IncludedRouter' object has no attribute 'path'" on
+# EVERY request (incl /health → all 500). Verified by repro: the break is ONLY
+# at 0.137; 0.136 is fine AND keeps starlette 1.3.1 (which sse-starlette 3.4.4 /
+# model-hosting-container-standards need >=0.49.1). So just cap below 0.137 —
+# do NOT pin to old 0.115 (that downgrades starlette and breaks sse-starlette).
+RUN pip install 'fastapi[standard]<0.137' \
+ && python3 -c 'import fastapi,starlette;print("fastapi",fastapi.__version__,"starlette",starlette.__version__)'
+
 ENTRYPOINT ["vllm"]
 CMD ["serve", "--help"]
