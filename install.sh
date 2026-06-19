@@ -33,6 +33,9 @@
 #   --launch         After build, automatically launch the container (Step 5).
 #                    Default: prompts interactively. With --launch, no prompt.
 #   --no-launch      Never launch, never prompt. Useful for CI / unattended runs.
+#   --model-only     Run Steps 0-2 (download + hybrid + MTP) only, then exit
+#                    before building any image. For setups that pull the serving
+#                    image from a registry (e.g. GHCR) instead of building it.
 #   -h | --help      Print this help and exit.
 #
 # Sudo: this script never invokes sudo. If a prerequisite is missing (apt
@@ -75,12 +78,14 @@ WITH_PR38325=1   # default ON since 2026-05-09 — PR #38325 gives ~+0.76% with
                  # zero extra build time on fresh installs (vLLM is rebuilt
                  # for SM121 either way). Set to 0 with --no-pr38325 to skip.
 LAUNCH_MODE="prompt"   # prompt | yes | no
+MODEL_ONLY=0           # --model-only: run Steps 0-2 then exit before image build
 for arg in "$@"; do
     case "$arg" in
         --no-cache)     NO_CACHE=1 ;;
         --no-pr38325)   WITH_PR38325=0 ;;
         --launch)       LAUNCH_MODE="yes" ;;
         --no-launch)    LAUNCH_MODE="no" ;;
+        --model-only)   MODEL_ONLY=1 ;;
         -h|--help)
             sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
             exit 0
@@ -329,6 +334,14 @@ else
         --source "${INTEL_DIR}" \
         --target "${MODEL_DIR}"
     step_end
+fi
+
+# ── --model-only: stop after model prep (serving image is pulled, not built) ──
+if [ "$MODEL_ONLY" = "1" ]; then
+    echo
+    ok "Model ready at ${MODEL_DIR} (Steps 0-2 done)."
+    note "--model-only set: skipping image build (Steps 3-4). Pull the image from your registry and launch via docker compose / docker run."
+    exit 0
 fi
 
 # ── --no-cache: nuke existing images and BuildKit cache ──────────────────────
