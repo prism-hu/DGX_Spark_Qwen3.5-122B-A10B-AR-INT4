@@ -1,0 +1,14 @@
+[project]
+name = "dgx-spark-qwen35-hostdeps"
+version = "0.0.0"
+description = "Host-side Python deps for Steps 0-2 (model download + hybrid checkpoint + MTP), pinned via uv.lock for reproducibility."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "torch",
+    "numpy",
+    "safetensors",
+    "huggingface-hub",
+]
+
+[tool.uv]
+package = false

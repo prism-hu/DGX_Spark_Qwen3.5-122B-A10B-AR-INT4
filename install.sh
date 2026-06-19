@@ -55,10 +55,19 @@ SPARK_VLLM_PIN="49d6d9fefd7cd05e63af8b28e4b514e9d30d249f"
 # vllm/_C.abi3.so and libtorch_cuda.so. The observed failure mode is a fatal
 # ImportError at startup: "undefined symbol: _ZN2at4cuda24getCurrentCUDABlasHandleEv".
 # Pinning both stages to the same date eliminates the drift.
-TORCH_NIGHTLY_DATE="20260408"
-TORCH_VERSION="2.12.0.dev${TORCH_NIGHTLY_DATE}+cu130"
-TORCHVISION_VERSION="0.27.0.dev${TORCH_NIGHTLY_DATE}+cu130"
-TORCHAUDIO_VERSION="2.11.0.dev${TORCH_NIGHTLY_DATE}+cu130"
+# prism-hu fork change (2026-06-19): upstream's single-date pin (20260408 /
+# torch 2.12.0) is past PyTorch nightly retention and gone from the index.
+# The 2.14 line (cu130, 6/14+) REQUIRES C++20 (torch headers use std::integral),
+# but vLLM 0.19.0 builds CUDA with C++17 -> compile fails on NumericUtils.h.
+# So we pin the surviving torch 2.13 line instead: 2.13.0.dev20260422 is just
+# ~2 weeks after upstream's known-good 2.12, and pairs with torchvision 0.27.0
+# (SAME minor as upstream's tested 0.27.0) -> same pre-C++20 era, builds in C++17.
+# torchvision/torchaudio cross-pin to a different day's torch, so the three do
+# NOT share one date; values below were uv-resolved (index-only, --prerelease).
+# Re-resolve when they expire (see docs/qwen35-vllm-build.md in the parent repo).
+TORCH_VERSION="2.13.0.dev20260422+cu130"
+TORCHVISION_VERSION="0.27.0.dev20260423+cu130"
+TORCHAUDIO_VERSION="2.11.0.dev20260619+cu130"
 
 # ── Flags ─────────────────────────────────────────────────────────────────────
 NO_CACHE=0
@@ -252,17 +261,21 @@ step_end
 
 # ── venv + host-side deps ─────────────────────────────────────────────────────
 step_begin "Setting up Python venv and host-side dependencies" \
-           "python3 -m venv .venv && pip install torch numpy safetensors huggingface_hub"
+           "uv sync --frozen  (reproducible: pyproject.toml + uv.lock)"
 
 cd "${PROJECT_DIR}"
-if [ ! -d .venv ]; then
-    python3 -m venv .venv
+# prism-hu fork change (2026-06-20): host deps are pinned via uv.lock for
+# reproducibility instead of an unpinned `pip install torch numpy ...`. uv sync
+# --frozen materializes the exact locked set into .venv (errors if lock is
+# stale). Only used by Steps 0-2 (checkpoint prep); harmless if those are
+# already done. Re-lock with `uv lock` after editing pyproject.toml.
+if ! command -v uv >/dev/null 2>&1; then
+    abort "uv not found — install it (https://docs.astral.sh/uv/) and re-run, or revert this step to python3 -m venv + pip."
 fi
+uv sync --frozen
 # shellcheck disable=SC1091
 source .venv/bin/activate
-pip install -q -U pip
-pip install -q torch numpy safetensors huggingface_hub
-note "venv: $(python3 -c 'import sys;print(sys.prefix)')"
+note "venv: $(python3 -c 'import sys;print(sys.prefix)')  (uv.lock)"
 note "hf:   $(hf --version 2>/dev/null || echo 'not present')"
 step_end
 
